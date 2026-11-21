@@ -1,0 +1,44 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: promotion-engine-poc
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        promotions.operation.duration: true
+      percentiles:
+        promotions.operation.duration: 0.5,0.95,0.99
+
+promotions:
+  engine:
+    quote-ttl-seconds: 600
+    default-conflict-policy: PRIORITY_RANK
+    max-stacking-limit: 5
+    default-channel: APP_CHECKOUT
+  security:
+    jwt-secret: "poc-super-secret-signing-key-256-bits-minimum-length-2026!!"
+  aws:
+    region: us-east-1
+    endpoint: http://localhost:4566
+    access-key: test
+    secret-key: test
+    dynamodb:
+      table-name: promotions_engine
+      auto-create-table: true
+    sqs:
+      cashback-queue-name: cashback-granted-events
+      auto-create-queue: true
+    outbox:
+      relay-enabled: true
+      poll-interval-ms: 500
