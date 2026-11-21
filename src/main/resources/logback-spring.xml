@@ -1,54 +1,74 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <includeMdcKeyName>correlationId</includeMdcKeyName>
-            <includeMdcKeyName>traceId</includeMdcKeyName>
-            <includeMdcKeyName>channel</includeMdcKeyName>
-            <fieldNames>
-                <timestamp>timestamp</timestamp>
-                <message>message</message>
-                <logger>logger</logger>
-                <thread>[ignore]</thread>
-                <levelValue>[ignore]</levelValue>
-                <version>[ignore]</version>
-            </fieldNames>
-        </encoder>
-    </appender>
+    <springProfile name="local">
+        <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
-    <appender name="AUDIT_JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <includeMdc>false</includeMdc>
-            <fieldNames>
-                <timestamp>timestamp</timestamp>
-                <message>message</message>
-                <logger>logger</logger>
-                <thread>[ignore]</thread>
-                <levelValue>[ignore]</levelValue>
-                <version>[ignore]</version>
-            </fieldNames>
-        </encoder>
-    </appender>
+        <appender name="TEXT_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+                <pattern>%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%5p) %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr([corr=%X{correlationId:--} trace=%X{traceId:--} ch=%X{channel:--}]){magenta} : %m%n%wEx</pattern>
+            </encoder>
+        </appender>
 
-    <appender name="ASYNC_JSON_CONSOLE" class="ch.qos.logback.classic.AsyncAppender">
-        <appender-ref ref="JSON_CONSOLE"/>
-        <queueSize>1024</queueSize>
-        <discardingThreshold>0</discardingThreshold>
-        <neverBlock>true</neverBlock>
-    </appender>
+        <logger name="PROMOTION_AUDIT" level="INFO" additivity="false">
+            <appender-ref ref="TEXT_CONSOLE"/>
+        </logger>
 
-    <appender name="ASYNC_AUDIT_JSON" class="ch.qos.logback.classic.AsyncAppender">
-        <appender-ref ref="AUDIT_JSON_CONSOLE"/>
-        <queueSize>1024</queueSize>
-        <discardingThreshold>0</discardingThreshold>
-        <neverBlock>true</neverBlock>
-    </appender>
+        <root level="INFO">
+            <appender-ref ref="TEXT_CONSOLE"/>
+        </root>
+    </springProfile>
 
-    <logger name="PROMOTION_AUDIT" level="INFO" additivity="false">
-        <appender-ref ref="ASYNC_AUDIT_JSON"/>
-    </logger>
+    <springProfile name="!local">
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeMdcKeyName>correlationId</includeMdcKeyName>
+                <includeMdcKeyName>traceId</includeMdcKeyName>
+                <includeMdcKeyName>channel</includeMdcKeyName>
+                <fieldNames>
+                    <timestamp>timestamp</timestamp>
+                    <message>message</message>
+                    <logger>logger</logger>
+                    <thread>[ignore]</thread>
+                    <levelValue>[ignore]</levelValue>
+                    <version>[ignore]</version>
+                </fieldNames>
+            </encoder>
+        </appender>
 
-    <root level="INFO">
-        <appender-ref ref="ASYNC_JSON_CONSOLE"/>
-    </root>
+        <appender name="AUDIT_JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeMdc>false</includeMdc>
+                <fieldNames>
+                    <timestamp>timestamp</timestamp>
+                    <message>message</message>
+                    <logger>logger</logger>
+                    <thread>[ignore]</thread>
+                    <levelValue>[ignore]</levelValue>
+                    <version>[ignore]</version>
+                </fieldNames>
+            </encoder>
+        </appender>
+
+        <appender name="ASYNC_JSON_CONSOLE" class="ch.qos.logback.classic.AsyncAppender">
+            <appender-ref ref="JSON_CONSOLE"/>
+            <queueSize>1024</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <neverBlock>true</neverBlock>
+        </appender>
+
+        <appender name="ASYNC_AUDIT_JSON" class="ch.qos.logback.classic.AsyncAppender">
+            <appender-ref ref="AUDIT_JSON_CONSOLE"/>
+            <queueSize>1024</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <neverBlock>true</neverBlock>
+        </appender>
+
+        <logger name="PROMOTION_AUDIT" level="INFO" additivity="false">
+            <appender-ref ref="ASYNC_AUDIT_JSON"/>
+        </logger>
+
+        <root level="INFO">
+            <appender-ref ref="ASYNC_JSON_CONSOLE"/>
+        </root>
+    </springProfile>
 </configuration>
