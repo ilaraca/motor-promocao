@@ -32,6 +32,18 @@ public final class DynamoDbTableInitializer {
         this.tableName = tableName;
     }
 
+    public String findExistingStreamArn() {
+        try {
+            DescribeTableResponse existing = dynamoDb.describeTable(
+                    DescribeTableRequest.builder().tableName(tableName).build()
+            );
+            return existing.table().latestStreamArn();
+        } catch (ResourceNotFoundException ex) {
+            log.warn("DynamoDB table '{}' does not exist; outbox stream ARN unavailable", tableName);
+            return null;
+        }
+    }
+
     public String ensureTableExistsAndReturnStreamArn() {
         try {
             DescribeTableResponse existing = dynamoDb.describeTable(

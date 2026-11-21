@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.DescribeStreamRequest;
+import software.amazon.awssdk.services.dynamodb.model.ExpiredIteratorException;
 import software.amazon.awssdk.services.dynamodb.model.GetRecordsRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetRecordsResponse;
 import software.amazon.awssdk.services.dynamodb.model.GetShardIteratorRequest;
@@ -17,10 +18,11 @@ import software.amazon.awssdk.services.dynamodb.model.OperationType;
 import software.amazon.awssdk.services.dynamodb.model.Record;
 import software.amazon.awssdk.services.dynamodb.model.Shard;
 import software.amazon.awssdk.services.dynamodb.model.ShardIteratorType;
+import software.amazon.awssdk.services.dynamodb.model.TrimmedDataAccessException;
 import software.amazon.awssdk.services.dynamodb.streams.DynamoDbStreamsClient;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -40,8 +42,15 @@ public class DynamoDbStreamsOutboxRelay {
     private final MeterRegistry meterRegistry;
     private final boolean enabled;
 
+    private static final int MAX_PROCESSED_CACHE_SIZE = 10_000;
+
     private final Map<String, String> shardIterators = new ConcurrentHashMap<>();
-    private final Set<String> processedEventIds = ConcurrentHashMap.newKeySet();
+    private final Map<String, Boolean> processedEventIds = new LinkedHashMap<>(256, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+            return size() > MAX_PROCESSED_CACHE_SIZE;
+        }
+    };
 
     public DynamoDbStreamsOutboxRelay(
             DynamoDbStreamsClient streamsClient,
@@ -81,10 +90,11 @@ public class DynamoDbStreamsOutboxRelay {
             ).streamDescription();
 
             for (Shard shard : streamDesc.shards()) {
-                String iterator = shardIterators.computeIfAbsent(shard.shardId(), shardId ->
+                String shardId = shard.shardId();
+                String iterator = shardIterators.computeIfAbsent(shardId, id ->
                         streamsClient.getShardIterator(GetShardIteratorRequest.builder()
                                 .streamArn(streamArn)
-                                .shardId(shardId)
+                                .shardId(id)
                                 .shardIteratorType(ShardIteratorType.TRIM_HORIZON)
                                 .build()).shardIterator()
                 );
@@ -93,11 +103,15 @@ public class DynamoDbStreamsOutboxRelay {
                     continue;
                 }
 
-                GetRecordsResponse recordsResponse = streamsClient.getRecords(
-                        GetRecordsRequest.builder().shardIterator(iterator).limit(100).build()
-                );
-                if (recordsResponse.nextShardIterator() != null) {
-                    shardIterators.put(shard.shardId(), recordsResponse.nextShardIterator());
+                GetRecordsResponse recordsResponse;
+                try {
+                    recordsResponse = streamsClient.getRecords(
+                            GetRecordsRequest.builder().shardIterator(iterator).limit(100).build()
+                    );
+                } catch (ExpiredIteratorException | TrimmedDataAccessException ex) {
+                    shardIterators.remove(shardId);
+                    log.warn("Resetting expired/trimmed shard iterator for shard '{}': {}", shardId, ex.getMessage());
+                    continue;
                 }
 
                 for (Record record : recordsResponse.records()) {
@@ -113,13 +127,21 @@ public class DynamoDbStreamsOutboxRelay {
                         continue;
                     }
                     String eventId = newImage.get("eventId").s();
-                    if (!processedEventIds.add(eventId)) {
+                    if (processedEventIds.containsKey(eventId)) {
                         continue;
                     }
                     String payloadJson = newImage.get("payloadJson").s();
                     CashbackGrantEvent event = codec.readCashbackEvent(payloadJson);
                     publisher.publishCashbackGranted(event);
+                    processedEventIds.put(eventId, Boolean.TRUE);
                     publishedCount++;
+                }
+
+                // Advance shard iterator only after every record in the batch was published successfully
+                if (recordsResponse.nextShardIterator() != null) {
+                    shardIterators.put(shardId, recordsResponse.nextShardIterator());
+                } else {
+                    shardIterators.remove(shardId);
                 }
             }
         } catch (Exception ex) {

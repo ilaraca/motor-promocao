@@ -89,12 +89,18 @@ public class AwsConfig {
     public String dynamoDbStreamArn(
             DynamoDbClient dynamoDbClient,
             @Value("${promotions.aws.dynamodb.table-name:promotions_engine}") String tableName,
-            @Value("${promotions.aws.dynamodb.auto-create-table:true}") boolean autoCreateTable
+            @Value("${promotions.aws.dynamodb.auto-create-table:true}") boolean autoCreateTable,
+            @Value("${promotions.aws.outbox.relay-enabled:true}") boolean relayEnabled
     ) {
-        if (!autoCreateTable) {
+        DynamoDbTableInitializer initializer = new DynamoDbTableInitializer(dynamoDbClient, tableName);
+        if (autoCreateTable) {
+            String arn = initializer.ensureTableExistsAndReturnStreamArn();
+            return arn != null ? arn : "";
+        }
+        if (!relayEnabled) {
             return "";
         }
-        String arn = new DynamoDbTableInitializer(dynamoDbClient, tableName).ensureTableExistsAndReturnStreamArn();
+        String arn = initializer.findExistingStreamArn();
         return arn != null ? arn : "";
     }
 
