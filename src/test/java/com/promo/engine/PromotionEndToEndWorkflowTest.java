@@ -49,6 +49,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.lang.NonNull;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -60,6 +61,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -175,21 +177,20 @@ class PromotionEndToEndWorkflowTest {
 
         int threads = 5;
         CyclicBarrier barrier = new CyclicBarrier(threads);
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
-        List<Callable<DecisionSnapshotResponse>> calls = new ArrayList<>();
-        for (int i = 0; i < threads; i++) {
-            calls.add(() -> {
-                barrier.await();
-                return commitOk(userToken, "ord_conc_1", eval.evaluationId(), "chk_same_key_5x");
-            });
-        }
-
-        List<Future<DecisionSnapshotResponse>> futures = pool.invokeAll(calls);
-        pool.shutdown();
-
         List<DecisionSnapshotResponse> results = new ArrayList<>();
-        for (Future<DecisionSnapshotResponse> f : futures) {
-            results.add(f.get());
+        try (ExecutorService pool = Executors.newFixedThreadPool(threads)) {
+            List<Callable<DecisionSnapshotResponse>> calls = new ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                calls.add(() -> {
+                    barrier.await();
+                    return commitOk(userToken, "ord_conc_1", eval.evaluationId(), "chk_same_key_5x");
+                });
+            }
+
+            List<Future<DecisionSnapshotResponse>> futures = pool.invokeAll(calls);
+            for (Future<DecisionSnapshotResponse> f : futures) {
+                results.add(f.get());
+            }
         }
 
         // All 5 concurrent callers receive byte-for-byte identical snapshot
@@ -236,7 +237,7 @@ class PromotionEndToEndWorkflowTest {
             mockMvc.perform(post("/v1/admin/promotions")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(buildRuleReq("promo_forbid", new BigDecimal("10"),
+                            .content(toJson(buildRuleReq("promo_forbid", new BigDecimal("10"),
                                     BenefitType.INSTANT_DISCOUNT, StackabilityMode.EXCLUSIVE, 1, 1, null, null))))
                     .andExpect(status().isForbidden());
 
@@ -249,7 +250,7 @@ class PromotionEndToEndWorkflowTest {
             mockMvc.perform(post("/v1/promotions/evaluate")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + attackerToken)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(new EvaluateRequest(
+                            .content(toJson(new EvaluateRequest(
                                     "usr_owner", new BigDecimal("180.00"), new BigDecimal("160.00"),
                                     List.of(new CartItemDto("ITEM-1", "RESTAURANTS", new BigDecimal("160.00"))),
                                     ConflictPolicy.PRIORITY_RANK))))
@@ -262,6 +263,10 @@ class PromotionEndToEndWorkflowTest {
                     .hasSize(2)
                     .allSatisfy(d -> assertThat(d.reasonCode()).isEqualTo("EXCLUSIVE_PROMOTION_CONFLICT"));
 
+            // Blank Idempotency-Key rejected with 400
+            MvcResult blankKey = commitRaw(ownerToken, "ord_blank", eval.evaluationId(), "   ");
+            assertThat(blankKey.getResponse().getStatus()).isEqualTo(400);
+
             // Attacker cannot commit owner's evaluationId (403)
             MvcResult stolen = commitRaw(attackerToken, "ord_stolen", eval.evaluationId(), "chk_stolen");
             assertThat(stolen.getResponse().getStatus()).isEqualTo(403);
@@ -269,6 +274,20 @@ class PromotionEndToEndWorkflowTest {
 
             // Owner commits
             commitOk(ownerToken, "ord_valid_1", eval.evaluationId(), "chk_unique_1");
+
+            // Attacker probing owner's checkoutKey with different orderId gets 403 (no key existence leak)
+            MvcResult probedKey = commitRaw(attackerToken, "ord_probe", eval.evaluationId(), "chk_unique_1");
+            assertThat(probedKey.getResponse().getStatus()).isEqualTo(403);
+
+            // Attacker cannot read owner's order snapshot (IDOR blocked -> 403)
+            mockMvc.perform(get("/v1/promotions/orders/ord_valid_1/snapshot")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + attackerToken))
+                    .andExpect(status().isForbidden());
+
+            // Admin can read order snapshot for auditing (200)
+            mockMvc.perform(get("/v1/promotions/orders/ord_valid_1/snapshot")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                    .andExpect(status().isOk());
 
             // Reusing same checkoutKey with different orderId -> 409 IDEMPOTENCY_KEY_CONFLICT
             MvcResult conflict = commitRaw(ownerToken, "ord_different_2", eval.evaluationId(), "chk_unique_1");
@@ -295,7 +314,7 @@ class PromotionEndToEndWorkflowTest {
         MvcResult result = mockMvc.perform(post("/v1/admin/promotions")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(buildRuleReq(
+                        .content(toJson(buildRuleReq(
                                 id, pct, type, mode, priorityRank, precedenceOrder, maxUsage, maxBudget))))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -326,7 +345,7 @@ class PromotionEndToEndWorkflowTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("X-Correlation-Id", corrId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new EvaluateRequest(
+                        .content(toJson(new EvaluateRequest(
                                 userId, gross, eligible,
                                 List.of(new CartItemDto("ITEM-01", "RESTAURANTS", eligible)),
                                 ConflictPolicy.PRIORITY_RANK))))
@@ -340,7 +359,7 @@ class PromotionEndToEndWorkflowTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new CommitRequest(orderId, evalId))))
+                        .content(toJson(new CommitRequest(orderId, evalId))))
                 .andExpect(status().isOk())
                 .andReturn();
         return objectMapper.readValue(result.getResponse().getContentAsString(), DecisionSnapshotResponse.class);
@@ -351,8 +370,13 @@ class PromotionEndToEndWorkflowTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new CommitRequest(orderId, evalId))))
+                        .content(toJson(new CommitRequest(orderId, evalId))))
                 .andReturn();
+    }
+
+    @NonNull
+    private String toJson(Object value) throws Exception {
+        return Objects.requireNonNull(objectMapper.writeValueAsString(value));
     }
 
     static class InMemoryStore {

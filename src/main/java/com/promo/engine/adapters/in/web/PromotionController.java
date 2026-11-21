@@ -10,6 +10,7 @@ import com.promo.engine.application.port.in.CommitPromotionsUseCase.CommitResult
 import com.promo.engine.application.port.in.EvaluatePromotionsUseCase;
 import com.promo.engine.application.port.in.EvaluatePromotionsUseCase.EvaluateCommand;
 import com.promo.engine.application.port.in.GetOrderSnapshotUseCase;
+import com.promo.engine.domain.exception.InvalidEvaluationRequestException;
 import com.promo.engine.domain.model.AuthenticatedPrincipal;
 import com.promo.engine.domain.model.CartItem;
 import com.promo.engine.domain.model.EvaluationQuote;
@@ -84,13 +85,16 @@ public class PromotionController {
             @Valid @RequestBody CommitRequest request,
             Authentication authentication
     ) {
+        if (checkoutKey == null || checkoutKey.isBlank()) {
+            throw new InvalidEvaluationRequestException("Header Idempotency-Key must not be blank");
+        }
         AuthenticatedPrincipal principal = principalResolver.resolve(authentication);
 
         CommitResult result = commitUseCase.commit(new CommitCommand(
                 principal,
                 request.orderId(),
                 request.evaluationId(),
-                checkoutKey,
+                checkoutKey.trim(),
                 MDC.get(CorrelationFilter.MDC_CORRELATION_ID),
                 MDC.get(CorrelationFilter.MDC_TRACE_ID),
                 MDC.get(CorrelationFilter.MDC_CHANNEL)
@@ -102,8 +106,12 @@ public class PromotionController {
     }
 
     @GetMapping("/orders/{orderId}/snapshot")
-    public ResponseEntity<DecisionSnapshotResponse> getOrderSnapshot(@PathVariable String orderId) {
-        return getOrderSnapshotUseCase.findByOrderId(orderId)
+    public ResponseEntity<DecisionSnapshotResponse> getOrderSnapshot(
+            @PathVariable String orderId,
+            Authentication authentication
+    ) {
+        AuthenticatedPrincipal principal = principalResolver.resolve(authentication);
+        return getOrderSnapshotUseCase.findByOrderId(principal, orderId)
                 .map(s -> ResponseEntity.ok(DecisionSnapshotResponse.fromDomain(s)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }

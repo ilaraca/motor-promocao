@@ -63,10 +63,10 @@ public final class CommitPromotionsService implements CommitPromotionsUseCase {
             Optional<IdempotentRecord> existing = commitTransactionPort.findIdempotentCommit(command.checkoutKey());
             if (existing.isPresent()) {
                 IdempotentRecord record = existing.get();
+                verifyOwnership(command, record.snapshot().userId(), command.evaluationId());
                 if (!record.payloadHash().equals(payloadHash)) {
                     throw new IdempotencyConflictException(command.checkoutKey());
                 }
-                verifyOwnership(command, record.snapshot().userId(), command.evaluationId());
 
                 long latencyMs = elapsedMs(startNanos);
                 auditEventPublisher.recordCommit(
