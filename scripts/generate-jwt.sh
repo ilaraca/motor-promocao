@@ -11,7 +11,7 @@ set -euo pipefail
 
 USER_ID="${1:-usr_98765}"
 SCOPE="${2:-promotions:checkout}"
-SEGMENTS_CSV="${3:-STANDARD}"
+SEGMENTS_CSV="${3-STANDARD}"
 JWT_SECRET="${JWT_SECRET:-poc-super-secret-signing-key-256-bits-minimum-length-2026!!}"
 
 python3 - "$USER_ID" "$SCOPE" "$SEGMENTS_CSV" "$JWT_SECRET" <<'PY'
