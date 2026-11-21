@@ -57,6 +57,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
@@ -71,6 +72,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PromotionPocIntegrationTest {
 
     @Container
+    @SuppressWarnings("resource")
     static final GenericContainer<?> LOCALSTACK = new GenericContainer<>(
             DockerImageName.parse("localstack/localstack:3.8")
     )
@@ -132,7 +134,8 @@ class PromotionPocIntegrationTest {
         ResponseEntity<PromotionRuleResponse> v1 = publishRule(promoId, new BigDecimal("10"),
                 BenefitType.INSTANT_DISCOUNT, StackabilityMode.STACKABLE, 1, 1, 5, new BigDecimal("5000.00"), Set.of("STANDARD"));
         assertThat(v1.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(v1.getBody().ruleVersion()).isEqualTo(1);
+        PromotionRuleResponse v1Body = Objects.requireNonNull(v1.getBody());
+        assertThat(v1Body.ruleVersion()).isEqualTo(1);
 
         // 2. Evaluate cart -> freezes ruleVersion: 1 (10% of 160.00 = 16.00)
         EvaluateResponse evalV1 = evaluate(userToken, userId, new BigDecimal("180.00"), new BigDecimal("160.00"), "corr-sc3-1");
@@ -148,14 +151,16 @@ class PromotionPocIntegrationTest {
         ResponseEntity<PromotionRuleResponse> v2 = publishRule(promoId, new BigDecimal("20"),
                 BenefitType.INSTANT_DISCOUNT, StackabilityMode.STACKABLE, 1, 1, 5, new BigDecimal("5000.00"), Set.of("STANDARD"));
         assertThat(v2.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(v2.getBody().ruleVersion()).isEqualTo(2);
+        PromotionRuleResponse v2Body = Objects.requireNonNull(v2.getBody());
+        assertThat(v2Body.ruleVersion()).isEqualTo(2);
 
         // 4. Commit evalV1 inside TTL (advance 2 minutes < 10 min TTL) -> MUST honor ruleVersion: 1!
         clock.advanceBySeconds(120);
         ResponseEntity<DecisionSnapshotResponse> commitResp = commit(
                 userToken, "ord_sc3_v1_" + System.nanoTime(), evalV1.evaluationId(), "chk_sc3_v1_" + System.nanoTime());
         assertThat(commitResp.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(commitResp.getBody().appliedPromotions())
+        DecisionSnapshotResponse commitBody = Objects.requireNonNull(commitResp.getBody());
+        assertThat(commitBody.appliedPromotions())
                 .anySatisfy(p -> {
                     assertThat(p.promotionId()).isEqualTo(promoId);
                     assertThat(p.ruleVersion()).isEqualTo(1);
@@ -211,25 +216,24 @@ class PromotionPocIntegrationTest {
         // Fire 5 simultaneous commit requests synchronized via CyclicBarrier
         int concurrency = 5;
         CyclicBarrier barrier = new CyclicBarrier(concurrency);
-        ExecutorService executor = Executors.newFixedThreadPool(concurrency);
-        List<Callable<ResponseEntity<DecisionSnapshotResponse>>> tasks = new ArrayList<>();
-
-        for (int i = 0; i < concurrency; i++) {
-            tasks.add(() -> {
-                barrier.await();
-                return commit(userToken, orderId, eval.evaluationId(), checkoutKey);
-            });
-        }
-
-        List<Future<ResponseEntity<DecisionSnapshotResponse>>> futures = executor.invokeAll(tasks);
-        executor.shutdown();
-
         List<DecisionSnapshotResponse> snapshots = new ArrayList<>();
-        for (Future<ResponseEntity<DecisionSnapshotResponse>> future : futures) {
-            ResponseEntity<DecisionSnapshotResponse> resp = future.get();
-            assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-            assertThat(resp.getBody()).isNotNull();
-            snapshots.add(resp.getBody());
+        try (ExecutorService executor = Executors.newFixedThreadPool(concurrency)) {
+            List<Callable<ResponseEntity<DecisionSnapshotResponse>>> tasks = new ArrayList<>();
+
+            for (int i = 0; i < concurrency; i++) {
+                tasks.add(() -> {
+                    barrier.await();
+                    return commit(userToken, orderId, eval.evaluationId(), checkoutKey);
+                });
+            }
+
+            List<Future<ResponseEntity<DecisionSnapshotResponse>>> futures = executor.invokeAll(tasks);
+
+            for (Future<ResponseEntity<DecisionSnapshotResponse>> future : futures) {
+                ResponseEntity<DecisionSnapshotResponse> resp = future.get();
+                assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+                snapshots.add(Objects.requireNonNull(resp.getBody()));
+            }
         }
 
         // All 5 responses MUST be identical snapshots
@@ -439,7 +443,7 @@ class PromotionPocIntegrationTest {
                 EvaluateResponse.class
         );
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-        return resp.getBody();
+        return Objects.requireNonNull(resp.getBody());
     }
 
     private ResponseEntity<DecisionSnapshotResponse> commit(String token, String orderId, String evaluationId, String checkoutKey) {
@@ -467,7 +471,7 @@ class PromotionPocIntegrationTest {
     private HttpHeaders authHeaders(String token) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(token);
+        headers.setBearerAuth(Objects.requireNonNull(token));
         return headers;
     }
 }

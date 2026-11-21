@@ -12,6 +12,7 @@ import com.promo.engine.domain.exception.RuleVersionConflictException;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.lang.NonNull;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -56,7 +57,7 @@ public class GlobalExceptionHandler {
         return buildProblem(HttpStatus.BAD_REQUEST, "MISSING_REQUIRED_HEADER", ex.getMessage());
     }
 
-    private ProblemDetail buildProblem(HttpStatus status, String errorCode, String detail) {
+    private ProblemDetail buildProblem(@NonNull HttpStatus status, String errorCode, String detail) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setTitle(errorCode);
         problem.setProperty("errorCode", errorCode);
