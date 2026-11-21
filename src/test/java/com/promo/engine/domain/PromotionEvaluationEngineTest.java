@@ -263,6 +263,24 @@ class PromotionEvaluationEngineTest {
                 .hasMessageContaining("Overlapping tier ranges");
     }
 
+    @Test
+    @DisplayName("Layer 1 Design-Time Validation rejects FIXED_AMOUNT tier that rounds to zero")
+    void shouldRejectFixedAmountTierRoundingToZero() {
+        PromotionRule invalidRule = new PromotionRule(
+                "promo_zero_fixed", 1, RuleStatus.ACTIVE, "Zero Fixed", VALID_FROM, VALID_TO,
+                BenefitType.INSTANT_DISCOUNT, StackabilityMode.STACKABLE, 1, 1, CalculationBase.ELIGIBLE_GROSS,
+                Money.of("50.00"), null, null, null, Set.of(), Set.of(),
+                List.of(
+                        new ProgressiveTier("t1", Money.of("50.00"), null, TierBenefitMode.FIXED_AMOUNT, new BigDecimal("0.001"))
+                ),
+                "admin", NOW
+        );
+
+        assertThatThrownBy(() -> validator.validate(invalidRule))
+                .isInstanceOf(InvalidRuleDefinitionException.class)
+                .hasMessageContaining("Fixed amount benefitValue must be positive");
+    }
+
     private PromotionRule progressiveDiscountRule(
             String id,
             int version,

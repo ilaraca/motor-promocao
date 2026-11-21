@@ -67,9 +67,7 @@ public final class EvaluatePromotionsService implements EvaluatePromotionsUseCas
                 ? command.conflictPolicyOverride()
                 : defaultConflictPolicy;
 
-        List<PromotionRule> activeRules = ruleRepository.findAllActive();
-
-        // Latency optimization: run static eligibility checks in memory before DynamoDB BatchGetItem
+        // Fail fast on invalid monetary/cart inputs before making any DynamoDB network calls
         EvaluationContext staticContext = new EvaluationContext(
                 command.targetUserId(),
                 command.principal().segments(),
@@ -81,6 +79,11 @@ public final class EvaluatePromotionsService implements EvaluatePromotionsUseCas
                 maxStackingLimit,
                 Map.of()
         );
+        evaluationEngine.validateInput(staticContext);
+
+        List<PromotionRule> activeRules = ruleRepository.findAllActive();
+
+        // Latency optimization: run static eligibility checks in memory before DynamoDB BatchGetItem
 
         Set<String> quotaLookupIds = activeRules.stream()
                 .filter(rule -> rule.maxUsagePerUser() != null || rule.maxCampaignBudget() != null)

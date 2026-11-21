@@ -91,7 +91,7 @@ public final class PromotionRuleValidator {
         if (tier.benefitMode() == TierBenefitMode.PERCENTAGE && value.compareTo(ONE_HUNDRED) > 0) {
             throw new InvalidRuleDefinitionException("Percentage benefitValue must be <= 100: " + tier.tierId());
         }
-        if (tier.benefitMode() == TierBenefitMode.FIXED_AMOUNT && Money.of(value).isNegative()) {
+        if (tier.benefitMode() == TierBenefitMode.FIXED_AMOUNT && !Money.of(value).isPositive()) {
             throw new InvalidRuleDefinitionException("Fixed amount benefitValue must be positive: " + tier.tierId());
         }
     }

@@ -50,6 +50,10 @@ public final class PromotionEvaluationEngine {
         return eligibilityEvaluator;
     }
 
+    public void validateInput(EvaluationContext context) {
+        inputValidator.validate(context);
+    }
+
     public EvaluationResult evaluate(List<PromotionRule> candidateRules, EvaluationContext context) {
         inputValidator.validate(context);
 
